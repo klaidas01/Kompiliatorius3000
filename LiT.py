@@ -120,7 +120,7 @@ class Lexer:
         self.lexer_generator.add(TT_EQ, r"=")
         self.lexer_generator.add(TT_LPAREN, r"\(")
         self.lexer_generator.add(TT_RPAREN, r"\)")
-        self.lexer_generator.add(TT_IDENTIFIER, r"[a-zA-Z_]+")
+        self.lexer_generator.add(TT_IDENTIFIER, r"[a-zA-Z][a-zA-Z0-9]*")
         self.lexer_generator.add(TT_ERROR, r".*\s")
 
     def get_token_list(self):
