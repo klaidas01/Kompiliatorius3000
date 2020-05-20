@@ -961,7 +961,8 @@ class Interpreter:
 
         if not value:
             return res.failure(RuntimeError(node.start_pos, node.end_pos, f"'{varName}' is undefined"))
-        value = value.copy().setPosition(node.start_pos, node.end_pos)
+        value.setPosition(node.start_pos, node.end_pos)
+        value = value.copy()
         return res.success(value)
 
     def visit_VarAssignNode(self, node, context):
