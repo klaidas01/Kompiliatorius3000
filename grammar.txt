@@ -15,7 +15,14 @@ power		: atom (POW factor)*
 
 atom 		: NUM|IDENTIFIER
 			: LPAREN expr RPAREN
+			: if-expr
+			: for-expr
+			: while-expr
 
 if-expr		: KEYWORD:if expr KEYWORD:then expr
 			: (KEYWORD:elif exrp KEYWORD:then expr)*
 			: (KEYWORD:else expr)?
+
+for-exrp	: KEYWORD:for IDENTIFIER EQ exrp KEYWORD:TO expr (KEYWORD:step expr)? KEYWORD:then expt
+
+while-expr	: KEYWORD:while expr KEYWORD:then expr

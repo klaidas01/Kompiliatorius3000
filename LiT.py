@@ -89,7 +89,11 @@ KEYWORDS        = [
     'if',
     'then',
     'elif',
-    'else'
+    'else',
+    'for',
+    'to',
+    'step',
+    'while'
 ]
 
 #LEXER
@@ -104,7 +108,7 @@ class Lexer:
 
     def define_lexer_rules(self):
         self.lexer_generator.ignore(r"\s+")
-        self.lexer_generator.add(TT_KEYWORD, r"num|and|or|not|if|then|elif|else")
+        self.lexer_generator.add(TT_KEYWORD, r"num|and|or|not|if|then|elif|else|for|to|step|while")
         self.lexer_generator.add(TT_NUM, r"(\d+(\.\d+)?)")
         self.lexer_generator.add(TT_PLUS, r"\+")
         self.lexer_generator.add(TT_MINUS, r"-")
@@ -191,6 +195,25 @@ class IfNode:
         self.start_pos = self.cases[0][0].start_pos
         self.end_pos = (self.else_case or self.cases[-1][0]).end_pos
 
+class ForNode:
+    def __init__(self, variable_name_token, start_value_node, end_value_node, step_value_node, body_node):
+        self.variable_name_token = variable_name_token
+        self.start_value_node = start_value_node
+        self.end_value_node = end_value_node
+        self.step_value_node = step_value_node
+        self.body_node = body_node
+
+        self.start_pos = self.body_node.start_pos
+        self.end_pos = self.body_node.end_pos
+
+class WhileNode:
+    def __init__(self, condition_node, body_node):
+        self.condition_node = condition_node
+        self.body_node = body_node
+
+        self.start_pos = self.condition_node.start_pos
+        self.end_pos = self.body_node.end_pos
+
 #PARSE RESULT
 
 class ParseResult:
@@ -275,6 +298,16 @@ class Parser:
             if_expr = res.register(self.if_expr())
             if res.error: return res
             return res.success(if_expr)
+
+        elif token.gettokentype() == TT_KEYWORD and token.getstr() == "for":
+            for_expr = res.register(self.for_expr())
+            if res.error: return res
+            return res.success(for_expr)
+
+        elif token.gettokentype() == TT_KEYWORD and token.getstr() == "while":
+            while_expr = res.register(self.while_expr())
+            if res.error: return res
+            return res.success(while_expr)
         
         start_pos = Position(token.getsourcepos().idx, token.getsourcepos().lineno - 1, token.getsourcepos().colno - 1, self.fn, self.txt)
         end_pos = Position(token.getsourcepos().idx, token.getsourcepos().lineno - 1, token.getsourcepos().colno, self.fn, self.txt)
@@ -404,7 +437,98 @@ class Parser:
             if res.error: return res
         
         return res.success(IfNode(cases, else_case))
-    
+
+    def for_expr(self):
+        res = ParseResult()
+
+        if not (self.current_token.gettokentype() == TT_KEYWORD and self.current_token.getstr() == 'for'):
+            start_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt)
+            end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno, self.fn, self.txt)
+            return res.failure(InvalidSyntaxError(start_pos, end_pos,f"Expected 'for'"))
+        
+        res.registerAdvance()
+        self.advance()
+
+        if self.current_token.gettokentype() != TT_IDENTIFIER:
+            start_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt)
+            end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno, self.fn, self.txt)
+            return res.failure(InvalidSyntaxError(start_pos, end_pos, f"Expected identifier"))
+
+        variable_name = self.current_token
+        res.registerAdvance()
+        self.advance()
+
+        if self.current_token.gettokentype() != TT_EQ:
+            start_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt)
+            end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno, self.fn, self.txt)
+            return res.failure(InvalidSyntaxError(start_pos, end_pos,f"Expected '='"))
+        
+        res.registerAdvance()
+        self.advance()
+
+        start_value = res.register(self.expr())
+        if res.error: return res
+
+        if not (self.current_token.gettokentype() == TT_KEYWORD and self.current_token.getstr() == 'to'):
+            start_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt)
+            end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno, self.fn, self.txt)
+            return res.failure(InvalidSyntaxError(start_pos, end_pos,f"Expected 'to'"))
+        
+        res.registerAdvance()
+        self.advance()
+
+        end_value = res.register(self.expr())
+        if res.error: return res
+
+        if self.current_token.gettokentype() == TT_KEYWORD and self.current_token.getstr() == 'step':
+            res.registerAdvance()
+            self.advance()
+
+            step_value = res.register(self.expr())
+            if res.error: return res
+        else:
+            step_value = None
+        
+        if not (self.current_token.gettokentype() == TT_KEYWORD and self.current_token.getstr() == 'then'):
+            start_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt)
+            end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno, self.fn, self.txt)
+            return res.failure(InvalidSyntaxError(start_pos, end_pos,f"Expected 'then'"))
+        
+        res.registerAdvance()
+        self.advance()
+
+        body = res.register(self.expr())
+        if res.error: return res
+
+        return res.success(ForNode(variable_name, start_value, end_value, step_value, body))
+
+    def while_expr(self):
+        res = ParseResult()
+
+        if not (self.current_token.gettokentype() == TT_KEYWORD and self.current_token.getstr() == 'while'):
+            start_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt)
+            end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno, self.fn, self.txt)
+            return res.failure(InvalidSyntaxError(start_pos, end_pos,f"Expected 'while'"))
+        
+        res.registerAdvance()
+        self.advance()
+
+        condition = res.register(self.expr())
+        if res.error: return res
+
+        if not (self.current_token.gettokentype() == TT_KEYWORD and self.current_token.getstr() == 'then'):
+            start_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt)
+            end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno, self.fn, self.txt)
+            return res.failure(InvalidSyntaxError(start_pos, end_pos,f"Expected 'then'"))
+        
+        res.registerAdvance()
+        self.advance()
+
+        body = res.register(self.expr())
+        if res.error: return res
+
+        return res.success(WhileNode(condition, body))
+
     def binaryOperation(self, funcA, operationTokens, funcB = None):
         if funcB == None:
             funcB = funcA
@@ -561,7 +685,7 @@ class Interpreter:
         value = context.symbolTable.get(varName)
 
         if not value:
-            res.failure(RuntimeError(node.start_pos, node.end_pos, f"'{varName}' is undefined"))
+            return res.failure(RuntimeError(node.start_pos, node.end_pos, f"'{varName}' is undefined"))
         value = value.copy().setPosition(node.start_pos, node.end_pos)
         return res.success(value)
 
@@ -647,6 +771,50 @@ class Interpreter:
             else_value = res.register(self.visit(node.else_case, context))
             if res.error: return res
             return res.success(else_value)
+        return res.success(None)
+
+    def visit_ForNode(self, node, context):
+        res = RuntimeResult()
+
+        start_value = res.register(self.visit(node.start_value_node, context))
+        if res.error: return res
+
+        end_value = res.register(self.visit(node.end_value_node, context))
+        if res.error: return res
+
+        if node.step_value_node:
+            step_value = res.register(self.visit(node.step_value_node, context))
+            if res.error: return res
+        else:
+            step_value = Number(1)
+        
+        i = start_value.value
+
+        if step_value.value >= 0:
+            condition = lambda: i < end_value.value
+        else:
+            condition = lambda: i > end_value.value
+        
+        while condition():
+            context.symbolTable.set(node.variable_name_token.value, Number(i))
+            i += step_value.value
+
+            res.register(self.visit(node.body_node, context))
+            if res.error: return res
+        
+        return res.success(None)
+    
+    def visit_WhileNode(self, node, context):
+        res = RuntimeResult()
+
+        while True:
+            condition = res.register(self.visit(node.condition_node, context))
+            if res.error: return res
+
+            if not condition.is_true(): break
+
+            res.register(self.visit(node.body_node, context))
+            if res.error: return res
         return res.success(None)
 
 #RUN
