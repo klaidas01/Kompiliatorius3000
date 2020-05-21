@@ -66,6 +66,7 @@ class Position:
 #TOKENS
 
 TT_NUM          = 'NUM'         #NUMBER TOKEN TYPE
+TT_STR          = 'STR'         #STRING TOKEN TYPE
 TT_IDENTIFIER   = 'IDENTIFIER'  #IDENTIFIER TOKEN TYPE
 TT_KEYWORD      = 'KEYWORD'     #VARIABLE NAME TOKEN TYPE
 TT_PLUS         = 'PLUS'        #ADDITION TOKEN TYPE
@@ -89,6 +90,7 @@ TT_ERROR        = 'ERROR'       #ILLEGAL TEXT ERROR
 
 KEYWORDS        = [
     'num',
+    'str',
     'and',
     'not',
     'or',
@@ -115,7 +117,8 @@ class Lexer:
 
     def define_lexer_rules(self):
         self.lexer_generator.ignore(r"\s+")
-        self.lexer_generator.add(TT_KEYWORD, r"function|num|and|or|not|if|then|elif|else|for|to|step|while")
+        self.lexer_generator.add(TT_STR, r"""(?=["'])(?:"[^"\\]*(?:\\[\s\S][^"\\]*)*"|'[^'\\]*(?:\\[\s\S][^'\\]*)*')""")
+        self.lexer_generator.add(TT_KEYWORD, r"\b(function|num|and|or|not|if|then|elif|else|for|to|step|while|str)\b")
         self.lexer_generator.add(TT_NUM, r"(\d+(\.\d+)?)")
         self.lexer_generator.add(TT_PLUS, r"\+")
         self.lexer_generator.add(TT_ARROW, r"->")
@@ -170,6 +173,14 @@ class VarAssignNode:
         self.end_pos = valueNode.end_pos
 
 class NumberNode:
+    def __init__(self, token, fn, txt):
+        self.token = token
+        self.start_pos = Position(self.token.getsourcepos().idx, self.token.getsourcepos().lineno - 1, self.token.getsourcepos().colno - 1, fn, txt)
+        self.end_pos = Position(self.token.getsourcepos().idx, self.token.getsourcepos().lineno - 1, self.token.getsourcepos().colno, fn, txt)
+    def __repr__(self):
+        return f'{self.token}'
+
+class StringNode:
     def __init__(self, token, fn, txt):
         self.token = token
         self.start_pos = Position(self.token.getsourcepos().idx, self.token.getsourcepos().lineno - 1, self.token.getsourcepos().colno - 1, fn, txt)
@@ -350,6 +361,11 @@ class Parser:
             self.advance()
             return res.success(NumberNode(token, self.fn, self.txt))
 
+        if token.gettokentype() == TT_STR:
+            res.registerAdvance()
+            self.advance()
+            return res.success(StringNode(token, self.fn, self.txt))
+
         elif token.gettokentype() == TT_IDENTIFIER:
             res.registerAdvance()
             self.advance()
@@ -439,7 +455,8 @@ class Parser:
             
     def expr(self):
         res = ParseResult()
-        if self.current_token.gettokentype() == TT_KEYWORD and self.current_token.getstr() == 'num':
+        if self.current_token.gettokentype() == TT_KEYWORD and (self.current_token.getstr() == 'num' or self.current_token.getstr() == 'str'):
+            varType = self.current_token.getstr()
             res.registerAdvance()
             self.advance()
             if self.current_token.gettokentype() != TT_IDENTIFIER:
@@ -457,7 +474,7 @@ class Parser:
             self.advance()
             expr = res.register(self.expr())
             if res.error: return res
-            return res.success(VarAssignNode('num', var_name, expr, self.fn, self.txt))
+            return res.success(VarAssignNode(varType, var_name, expr, self.fn, self.txt))
 
         node = res.register(self.binaryOperation(self.comp_expr, ((TT_KEYWORD, "and"), (TT_KEYWORD, "or"))))
         if res.error: 
@@ -922,6 +939,29 @@ class Function(Value):
     def __repr__(self):
         return f"<function '{self.name}'>"
 
+class String(Value):
+    def __init__(self, value):
+        super().__init__()
+        self.value = value
+    
+    def add(self, other):
+        if isinstance(other, String):
+            return String(self.value[:-1] + other.value[1:]).setContext(self.context), None
+        else:
+            return None, Value.illegal_operation(self, other)
+    
+    def is_true(self):
+        return len(self.value) > 0
+    
+    def copy(self):
+        copy = String(self.value)
+        copy.setContext(self.context)
+        copy.setPosition(self.start_pos, self.end_pos)
+        return copy
+
+    def __repr__(self):
+        return f'{self.value}'
+
 #CONTEXT
 
 class Context:
@@ -978,11 +1018,17 @@ class Interpreter:
         if node.varType == 'num' and not isinstance(value, Number):
             return res.failure(TypeError(node.start_pos, node.end_pos, 'Expected a number'))
 
+        if node.varType == 'str' and not isinstance(value, String):
+            return res.failure(TypeError(node.start_pos, node.end_pos, 'Expected a string'))
+
         context.symbolTable.set(varName, value)
         return res.success(value)
 
     def visit_NumberNode(self, node, context):
         return RuntimeResult().success(Number(node.token.getstr()).setPosition(node.start_pos, node.end_pos))
+
+    def visit_StringNode(self, node, context):
+        return RuntimeResult().success(String(node.token.value).setPosition(node.start_pos, node.end_pos).setContext(context))
 
     def visit_FunctionDefinitionNode(self, node, context):
         res = RuntimeResult()
