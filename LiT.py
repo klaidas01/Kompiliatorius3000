@@ -37,6 +37,10 @@ class RuntimeError(Error):
     def __init__(self, start_pos, end_pos, details):
         super().__init__(start_pos, end_pos, 'Runtime error', details)
 
+class TypeError(Error):
+    def __init__(self, start_pos, end_pos, details):
+        super().__init__(start_pos, end_pos, 'Type error', details)
+
 #POSITION
 
 class Position:
@@ -158,7 +162,8 @@ class VarAccessNode:
         self.end_pos = Position(self.varNameToken.getsourcepos().idx, self.varNameToken.getsourcepos().lineno - 1, self.varNameToken.getsourcepos().colno, fn, txt)
 
 class VarAssignNode:
-    def __init__(self, varNameToken, valueNode, fn, txt):
+    def __init__(self, varType, varNameToken, valueNode, fn, txt):
+        self.varType = varType
         self.varNameToken = varNameToken
         self.valueNode = valueNode
         self.start_pos = Position(self.varNameToken.getsourcepos().idx, self.varNameToken.getsourcepos().lineno - 1, self.varNameToken.getsourcepos().colno - 1, fn, txt)
@@ -452,7 +457,7 @@ class Parser:
             self.advance()
             expr = res.register(self.expr())
             if res.error: return res
-            return res.success(VarAssignNode(var_name, expr, self.fn, self.txt))
+            return res.success(VarAssignNode('num', var_name, expr, self.fn, self.txt))
 
         node = res.register(self.binaryOperation(self.comp_expr, ((TT_KEYWORD, "and"), (TT_KEYWORD, "or"))))
         if res.error: 
@@ -970,6 +975,8 @@ class Interpreter:
         varName = node.varNameToken.value
         value = res.register(self.visit(node.valueNode, context))
         if res.error: return res
+        if node.varType == 'num' and not isinstance(value, Number):
+            return res.failure(TypeError(node.start_pos, node.end_pos, 'Expected a number'))
 
         context.symbolTable.set(varName, value)
         return res.success(value)
