@@ -929,7 +929,7 @@ class BaseFunction(Value):
         self.name = name or "<anonymous>"
     
     def generateNewContext(self):
-        new_context = Context(self.name, self.context, self.start_pos)
+        new_context = Context(self.context)
         new_context.symbolTable = SymbolTable(new_context.parent.symbolTable)
         return new_context
 
@@ -1083,7 +1083,8 @@ class Interpreter:
 
         if not value:
             return res.failure(RuntimeError(node.start_pos, node.end_pos, f"'{varName}' is undefined", context))
-        value = value.copy().setPosition(node.start_pos, node.end_pos).setContext(context)
+        value.setPosition(node.start_pos, node.end_pos).setContext(context)
+        value = value.copy()
         return res.success(value)
 
     def visit_VarAssignNode(self, node, context):
@@ -1130,6 +1131,7 @@ class Interpreter:
             if res.error: return res
         return_value = res.register(value_to_call.execute(args))
         if res.error: return res
+        return_value.setPosition(node.start_pos, node.end_pos).setContext(context)
         return_value = return_value.copy().setPosition(node.start_pos, node.end_pos).setContext(context)
         return res.success(return_value)
 
