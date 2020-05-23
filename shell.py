@@ -5,4 +5,4 @@ while True:
     result, error = LiT.run('input file name', text)
 
     if error: print(error.toString())
-    elif result: print(result)
+    elif result: print(repr(result))

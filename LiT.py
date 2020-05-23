@@ -894,6 +894,9 @@ class Number(Value):
         copy.setPosition(self.start_pos, self.end_pos)
         return copy
 
+    def __str__(self):
+        return str(self.value)
+
     def __repr__(self):
         return str(self.value)
 
@@ -1015,7 +1018,7 @@ class BuiltInFunction(BaseFunction):
         return f'{self.name}'
 
     def execute_print(self, exec_ctx):
-        print(str(exec_ctx.symbolTable.get('value')))
+        print(str(exec_ctx.symbolTable.get('value')).strip('"\''))
         return RuntimeResult().success(Number(0))
     execute_print.arg_names = ['value']
 
