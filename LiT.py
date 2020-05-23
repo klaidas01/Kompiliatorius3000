@@ -4,12 +4,6 @@ from errorArrows import *
 import string
 from rply import LexerGenerator
 
-#CONSTANTS
-
-DIGITS = '0123456789'
-LETTERS = string.ascii_letters
-LETTERS_DIGITS = LETTERS + DIGITS
-
 #ERRORS
 
 class Error:
@@ -803,6 +797,7 @@ class Value:
     def illegal_operation(self, other = None):
         if not other: other = self
         return RuntimeError(self.start_pos, other.end_pos, 'Illegal operation')
+
 class Number(Value):
     def __init__(self, value):
         super().__init__()
@@ -902,43 +897,6 @@ class Number(Value):
     def __repr__(self):
         return str(self.value)
 
-class Function(Value):
-    def __init__(self, name, body_node, arg_names):
-        super().__init__()
-        self.name = name or "<anonymous>"
-        self.body_node = body_node
-        self.arg_names = arg_names
-
-    def execute(self, args):
-        res = RuntimeResult()
-        interpreter = Interpreter()
-        new_context = Context(self.context)
-        new_context.symbolTable = SymbolTable(new_context.parent.symbolTable)
-
-        if len(args) > len(self.arg_names):
-            return res.failure(RuntimeError(self.start_pos, self.end_pos, f"Too many arguments passed into '{self.name}'"))
-        
-        if len(args) < len(self.arg_names):
-            return res.failure(RuntimeError(self.start_pos, self.end_pos, f"Not enough arguments passed into '{self.name}'"))
-        
-        for i in range(len(args)):
-            arg_name = self.arg_names[i]
-            arg_value = args[i]
-            new_context.symbolTable.set(arg_name, arg_value)
-        
-        value = res.register(interpreter.visit(self.body_node, new_context))
-        if res.error: return res
-        return res.success(value)
-    
-    def copy(self):
-        copy = Function(self.name, self.body_node, self.arg_names)
-        copy.setPosition(self.start_pos, self.end_pos)
-        copy.setContext(self.context)
-        return copy
-    
-    def __repr__(self):
-        return f"<function '{self.name}'>"
-
 class String(Value):
     def __init__(self, value):
         super().__init__()
@@ -955,12 +913,131 @@ class String(Value):
     
     def copy(self):
         copy = String(self.value)
+        copy.setPosition(self.start_pos, self.end_pos)
+        copy.setContext(self.context)
+        return copy
+
+    def __str__(self):
+        return self.value
+
+    def __repr__(self):
+        return f'{self.value}'
+
+class BaseFunction(Value):
+    def __init__(self, name):
+        super().__init__()
+        self.name = name or "<anonymous>"
+    
+    def generateNewContext(self):
+        new_context = Context(self.name, self.context, self.start_pos)
+        new_context.symbolTable = SymbolTable(new_context.parent.symbolTable)
+        return new_context
+
+    def check_args(self, arg_names, args):
+        res = RuntimeResult()
+
+        if len(args) > len(arg_names):
+            return res.failure(RuntimeError(self.start_pos, self.end_pos, f"Too many arguments passed into '{self}'", self.context))
+        
+        if len(args) < len(arg_names):
+            return res.failure(RuntimeError(self.start_pos, self.end_pos, f"Not enough arguments passed into '{self}'", self.context))
+        
+        return res.success(None)
+    
+    def populateArgs(self, arg_names, args, exec_ctx):
+        for i in range(len(args)):
+            arg_name = arg_names[i]
+            arg_value = args[i]
+            arg_value.setContext(exec_ctx)
+            exec_ctx.symbolTable.set(arg_name, arg_value)
+
+    def checkAndPopulateArgs(self, arg_names, args, exec_ctx):
+        res = RuntimeResult()
+        res.register(self.check_args(arg_names, args))
+        if res.error: return res
+        self.populateArgs(arg_names, args, exec_ctx)
+        return res.success(None)
+
+class Function(BaseFunction):
+    def __init__(self, name, body_node, arg_names):
+        super().__init__(name)
+        self.body_node = body_node
+        self.arg_names = arg_names
+
+    def execute(self, args):
+        res = RuntimeResult()
+        interpreter = Interpreter()
+        exec_ctx = self.generateNewContext()
+        res.register(self.checkAndPopulateArgs(self.arg_names, args, exec_ctx))
+        if res.error: return res
+        
+        value = res.register(interpreter.visit(self.body_node, exec_ctx))
+        if res.error: return res
+        return res.success(value)
+    
+    def copy(self):
+        copy = Function(self.name, self.body_node, self.arg_names)
+        copy.setContext(self.context)
+        copy.setPosition(self.start_pos, self.end_pos)
+        return copy
+    
+    def __repr__(self):
+        return f"<function '{self.name}'>"
+
+class BuiltInFunction(BaseFunction):
+    def __init__(self, name):
+        super().__init__(name)
+
+    def execute(self, args):
+        res =  RuntimeResult()
+        exec_ctx = self.generateNewContext()
+
+        methodName = f'execute_{self.name}'
+        method = getattr(self, methodName, self.noVisit)
+
+        res.register(self.checkAndPopulateArgs(method.arg_names, args, exec_ctx))
+        if res.error: return res
+
+        returnVal = res.register(method(exec_ctx))
+        if res.error: return res
+        return res.success(returnVal)
+
+    def noVisit(self, node, context):
+        raise Exception(f'No execute_{self.name} method defined')
+
+    def copy(self):
+        copy = BuiltInFunction(self.name)
         copy.setContext(self.context)
         copy.setPosition(self.start_pos, self.end_pos)
         return copy
 
     def __repr__(self):
-        return f'{self.value}'
+        return f'{self.name}'
+
+    def execute_print(self, exec_ctx):
+        print(str(exec_ctx.symbolTable.get('value')))
+        return RuntimeResult().success(Number(0))
+    execute_print.arg_names = ['value']
+
+    def execute_input(self, exec_ctx):
+        text = input()
+        return RuntimeResult().success(String(text))
+    execute_input.arg_names = []
+
+    def execute_inputNum(self, exec_ctx):
+        while True:
+            text = input()
+            try: 
+                number = int(text)
+                break
+            except ValueError:
+                print(f"'{text}' must be an integer")
+            return RuntimeResult().success(Number(number))
+    execute_inputNum.arg_names = []
+
+BuiltInFunction.print = BuiltInFunction("print")
+BuiltInFunction.input = BuiltInFunction("input")
+BuiltInFunction.inputNum = BuiltInFunction("inputNum")
 
 #CONTEXT
 
@@ -1005,9 +1082,8 @@ class Interpreter:
         value = context.symbolTable.get(varName)
 
         if not value:
-            return res.failure(RuntimeError(node.start_pos, node.end_pos, f"'{varName}' is undefined"))
-        value.setPosition(node.start_pos, node.end_pos)
-        value = value.copy()
+            return res.failure(RuntimeError(node.start_pos, node.end_pos, f"'{varName}' is undefined", context))
+        value = value.copy().setPosition(node.start_pos, node.end_pos).setContext(context)
         return res.success(value)
 
     def visit_VarAssignNode(self, node, context):
@@ -1015,6 +1091,7 @@ class Interpreter:
         varName = node.varNameToken.value
         value = res.register(self.visit(node.valueNode, context))
         if res.error: return res
+
         if node.varType == 'num' and not isinstance(value, Number):
             return res.failure(TypeError(node.start_pos, node.end_pos, 'Expected a number'))
 
@@ -1053,6 +1130,7 @@ class Interpreter:
             if res.error: return res
         return_value = res.register(value_to_call.execute(args))
         if res.error: return res
+        return_value = return_value.copy().setPosition(node.start_pos, node.end_pos).setContext(context)
         return res.success(return_value)
 
     def visit_BinaryOperationNode(self, node, context):
@@ -1174,6 +1252,9 @@ class Interpreter:
 #RUN
 
 globalSymbolTable = SymbolTable()
+globalSymbolTable.set("print", BuiltInFunction.print)
+globalSymbolTable.set("input", BuiltInFunction.input)
+globalSymbolTable.set("inputNum", BuiltInFunction.inputNum)
 
 def run(fn, text):
     #Generate tokens
@@ -1188,7 +1269,7 @@ def run(fn, text):
     
     #Run the program
     interpreter = Interpreter()
-    context = Context()
+    context = Context('<program>')
     context.symbolTable = globalSymbolTable
     result = interpreter.visit(ast.node, context)
 
