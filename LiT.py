@@ -535,7 +535,6 @@ class Parser:
                 moreStatements = False
                 continue
             statements.append(statement)
-
         return res.success(ListNode(statements, start_pos, end_pos.copy()))
             
     def statement(self):
@@ -1583,13 +1582,11 @@ def run(fn, text):
     lexer = Lexer(fn, text)
     token_list, token_count, error = lexer.get_token_list()
     if error: return None, error
-    print(token_list)
 
     #Generate abstract syntax tree
     parser = Parser(token_list, token_count, fn, text)
     ast = parser.parse()
     if ast.error: return None, ast.error
-    
     #Run the program
     interpreter = Interpreter()
     context = Context()
