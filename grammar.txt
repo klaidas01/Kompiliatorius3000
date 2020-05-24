@@ -1,4 +1,9 @@
-statements	: NEWLINE* expt(NEWLINE+ expr)* NEWLINE*
+statements	: NEWLINE* statement(NEWLINE+ statement)* NEWLINE*
+
+statement	: KEYWORD:RETURN expr?
+			: KEYWORD:CONTINUE
+			: KEYWORD:BREAK
+			: expr
 
 expr        : KEYWORD IDENTIFIER EQ expr
 			: comp-expr ((KEYWORD:and|KEYWORD:or) comp-expr)*
@@ -41,11 +46,11 @@ else-expr	: KEYWORD:else
 
 for-expr	: KEYWORD:for IDENTIFIER EQ exrp KEYWORD:TO expr
 			  (KEYWORD:step expr)? KEYWORD:then
-			  expr
+			  statement
 			| (NEWLINE statements KEYWORD:end)
 
 while-expr	: KEYWORD:while expr KEYWORD:then 
-			  expr
+			  statement
 			| (NEWLINE statements KEYWORD:end)
 
 func-def	: KEYWORD:function IDENTIFIER? LPAREN (IDENTIFIER (COMMA, IDENTIFIER)*)? RPAREN
