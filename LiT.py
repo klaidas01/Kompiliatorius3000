@@ -29,8 +29,9 @@ class InvalidSyntaxError(Error):
         super().__init__(start_pos, end_pos, 'Invalid Syntax', details)
 
 class RuntimeError(Error):
-    def __init__(self, start_pos, end_pos, details):
+    def __init__(self, start_pos, end_pos, details, context):
         super().__init__(start_pos, end_pos, 'Runtime error', details)
+        self.context = context
 
 class TypeError(Error):
     def __init__(self, start_pos, end_pos, details):
@@ -140,8 +141,8 @@ class Lexer:
         self.lexer_generator.add(TT_LSQUARE, r"\[")
         self.lexer_generator.add(TT_RSQUARE, r"\]")
         self.lexer_generator.add(TT_IDENTIFIER, r"[a-zA-Z][a-zA-Z0-9]*")
-        self.lexer_generator.add(TT_ERROR, r".*\s")
         self.lexer_generator.add(TT_NL, r";")
+        self.lexer_generator.add(TT_ERROR, r".*\s")
 
     def get_token_list(self):
         initialTokens = self.builtLexer.lex(self.text)
@@ -512,7 +513,7 @@ class Parser:
 
         while True:
             nlCount = 0
-            while self.current_token.gettokentype() == TT_NL:
+            while self.current_token.gettokentype() == TT_NL and self.token_index != self.token_count:
                 res.registerAdvance()
                 self.advance()
                 nlCount += 1
@@ -547,12 +548,11 @@ class Parser:
           return res.success(BreakNode(start_pos, self.current_token.start_pos.copy()))
 
         expr = res.register(self.expr())
-        end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno, self.fn, self.txt)
-
+        start_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt).copy()
+        end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno, self.current_token.getsourcepos().colno, self.fn, self.txt).copy()
         if res.error:
           return res.failure(InvalidSyntaxError(
-            self.current_token.start_pos, self.current_tok.end_pos,
-            "Expected 'return', 'break', 'num', 'if', 'for', 'while', 'function', identifier, '+', '-', '(' or '['"
+            start_pos, end_pos, "Expected 'return', 'break', 'num', 'if', 'for', 'while', 'function', identifier, '+', '-', '(' or '['"
           ))
         return res.success(expr)
 
@@ -583,7 +583,7 @@ class Parser:
         if res.error: 
             start_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt)
             end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno, self.fn, self.txt)
-            return res.failure(InvalidSyntaxError(start_pos, end_pos, "Expected 'num', number, indentifier, '+', '-', '[' or '('"))
+            return res.failure(InvalidSyntaxError(start_pos, end_pos, "Expected 'num', number, indentifier, '+', '-', '[', '\"' or '('"))
         return res.success(node)
     
     def list_expr(self):
@@ -949,7 +949,7 @@ class Value:
     
     def illegal_operation(self, other = None):
         if not other: other = self
-        return RuntimeError(self.start_pos, other.end_pos, 'Illegal operation')
+        return RuntimeError(self.start_pos, other.end_pos, 'Illegal operation', self.context)
 
 class Number(Value):
     def __init__(self, value):
@@ -977,7 +977,7 @@ class Number(Value):
     def divide(self, number):
         if isinstance(number, Number):
             if number.value == 0:
-                return None, RuntimeError(number.start_pos, number.end_pos, 'Division by 0')
+                return None, RuntimeError(number.start_pos, number.end_pos, 'Division by 0', self.context)
             return Number(self.value / number.value), None
         else:
             return None, Value.illegal_operation(self, number)
@@ -1052,6 +1052,8 @@ class Number(Value):
 
     def __repr__(self):
         return str(self.value)
+        
+Number.null = Number(0)
 
 class String(Value):
     def __init__(self, value):
@@ -1126,8 +1128,8 @@ class List(Value):
   
   def copy(self):
     copy = List(self.elements)
-    copy.set_pos(self.start_pos, self.end_pos)
-    copy.set_context(self.context)
+    copy.setPosition(self.start_pos, self.end_pos)
+    copy.setContext(self.context)
     return copy
 
   def __str__(self):
@@ -1213,9 +1215,49 @@ class BuiltInFunction(BaseFunction):
             return RuntimeResult().success(Number(number))
     execute_inputNum.arg_names = []
 
+    def execute_len(self, exec_ctx):
+        list_ = exec_ctx.symbolTable.get("list")
+
+        if not isinstance(list_, List):
+            return RuntimeResult().failure(RuntimeError(
+                self.start_pos, self.end_pos, "Argument must be list", exec_ctx
+            ))
+        
+        return RuntimeResult().success(Number(len(list_.elements)))
+    execute_len.arg_names = ["list"]
+
+    def execute_run(self, exec_ctx):
+        fn = exec_ctx.symbolTable.get("fn")
+
+        if not isinstance(fn, String):
+            return RuntimeResult().failure(RuntimeError(
+                self.start_pos, self.end_pos, "Argument must be string", exec_ctx
+            ))
+        
+        fn = fn.value.replace("\"", "")
+        try:
+            with open(fn, "r") as f:
+                script = f.read()
+        except Exception as e:
+            return RuntimeResult().failure(RuntimeError(
+                self.start_pos, self.end_pos, f"Failed to load script \"{fn}\"\n" + str(e), exec_ctx
+            ))
+        
+        _, error = run(fn, script)
+
+        if error:
+            return RuntimeResult().failure(RuntimeError(
+                self.start_pos, self.end_pos, f"Failed to finish executing script \"{fn}\"\n" + error.toString(), exec_ctx
+            ))
+
+        return RuntimeResult().success(Number.null)
+    execute_run.arg_names = ["fn"]
+
 BuiltInFunction.print = BuiltInFunction("print")
 BuiltInFunction.input = BuiltInFunction("input")
 BuiltInFunction.inputNum = BuiltInFunction("inputNum")
+BuiltInFunction.len = BuiltInFunction("len")
+BuiltInFunction.run = BuiltInFunction("run")
 
 #CONTEXT
 
@@ -1447,6 +1489,8 @@ globalSymbolTable = SymbolTable()
 globalSymbolTable.set("print", BuiltInFunction.print)
 globalSymbolTable.set("input", BuiltInFunction.input)
 globalSymbolTable.set("inputNum", BuiltInFunction.inputNum)
+globalSymbolTable.set("LEN", BuiltInFunction.len)
+globalSymbolTable.set("RUN", BuiltInFunction.run)
 
 def run(fn, text):
     #Generate tokens
