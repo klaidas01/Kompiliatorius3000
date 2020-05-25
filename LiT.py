@@ -225,7 +225,7 @@ class IfNode:
         self.cases = cases
         self.else_case = else_case
         self.start_pos = self.cases[0][0].start_pos
-        self.end_pos = (self.else_case or self.cases[-1][0]).end_pos
+        self.end_pos = (self.else_case or self.cases[-1])[0].end_pos
 
 class ForNode:
     def __init__(self, variable_name_token, start_value_node, end_value_node, step_value_node, body_node, should_return_null):
@@ -634,56 +634,109 @@ class Parser:
 
     def if_expr(self):
         res = ParseResult()
+        all_cases = res.register(self.if_expr_cases('if'))
+        if res.error: return res
+        cases, else_case = all_cases
+        return res.success(IfNode(cases, else_case))
+    
+    def if_expr_b(self):
+        return self.if_expr_cases('elif')
+
+    def if_expr_c(self):
+        res = ParseResult()
+        else_case = None
+
+        if self.current_token.getstr() == 'else':
+            res.registerAdvance()
+            self.advance()
+
+            if self.current_token.gettokentype() == TT_NL:
+                res.registerAdvance()
+                self.advance()
+
+                statements = res.register(self.statements())
+                if res.error: return res
+                else_case = (statements, True)
+
+                if self.current_token.getstr() == 'end':
+                    res.registerAdvance()
+                    self.advance()
+                else:
+                    start_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt)
+                    end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno, self.fn, self.txt)
+                    return res.failure(InvalidSyntaxError(start_pos, end_pos,"Expected 'END'"))
+            else:
+                expr = res.register(self.statement())
+                if res.error: return res
+                else_case = (expr, False)
+
+        return res.success(else_case)   
+
+    def if_expr_b_or_c(self):
+        res = ParseResult()
+        cases, else_case = [], None
+
+        if self.current_token.getstr() == 'elif':
+            all_cases = res.register(self.if_expr_b())
+            if res.error: return res
+            cases, else_case = all_cases
+        else:
+            else_case = res.register(self.if_expr_c())
+            if res.error: return res
+        
+        return res.success((cases, else_case))
+    
+    def if_expr_cases(self, case_keyword):
+        res = ParseResult()
         cases = []
         else_case = None
-        start_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt)
-        end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno, self.fn, self.txt)
-        if not (self.current_token.gettokentype() == TT_KEYWORD and self.current_token.getstr() == 'if'):
-            return res.failure(InvalidSyntaxError(start_pos, end_pos,f"Expected 'if'"))
+
+        if not self.current_token.getstr() == case_keyword:
+            start_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt)
+            end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno, self.fn, self.txt)
+            return res.failure(InvalidSyntaxError(start_pos, end_pos,f"Expected '{case_keyword}'"))
+
         res.registerAdvance()
         self.advance()
 
         condition = res.register(self.expr())
         if res.error: return res
 
-        start_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt)
-        end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno, self.fn, self.txt)
-        if not (self.current_token.gettokentype() == TT_KEYWORD and self.current_token.getstr() == 'then'):
-            return res.failure(InvalidSyntaxError(start_pos, end_pos, f"Expected 'then'"))
-        
+        if not self.current_token.getstr() == 'then':
+            start_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt)
+            end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno, self.fn, self.txt)
+            return res.failure(InvalidSyntaxError(start_pos, end_pos,f"Expected 'THEN'"))
+
         res.registerAdvance()
         self.advance()
 
-        expr = res.register(self.expr())
-        if res.error: return res
-        cases.append((condition, expr))
-
-        while self.current_token.gettokentype() == TT_KEYWORD and self.current_token.getstr() == 'elif':
+        if self.current_token.gettokentype() == TT_NL:
             res.registerAdvance()
             self.advance()
 
-            condition = res.register(self.expr())
+            statements = res.register(self.statements())
             if res.error: return res
+            cases.append((condition, statements, True))
 
-            start_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt)
-            end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno, self.fn, self.txt)
-            if not (self.current_token.gettokentype() == TT_KEYWORD and self.current_token.getstr() == 'then'):
-                return res.failure(InvalidSyntaxError(start_pos, end_pos, f"Expected 'then'"))
-            
-            res.registerAdvance()
-            self.advance()
-
-            expr = res.register(self.expr())
+            if self.current_token.getstr() == 'END':
+                res.registerAdvance()
+                self.advance()
+            else:
+                all_cases = res.register(self.if_expr_b_or_c())
+                if res.error: return res
+                new_cases, else_case = all_cases
+                cases.extend(new_cases)
+        else:
+            expr = res.register(self.statement())
             if res.error: return res
-            cases.append((condition, expr))
+            cases.append((condition, expr, False))
 
-        if self.current_token.gettokentype() == TT_KEYWORD and self.current_token.getstr() == 'else':
-            res.registerAdvance()
-            self.advance()
-            else_case = res.register(self.expr())
+            all_cases = res.register(self.if_expr_b_or_c())
             if res.error: return res
-        
-        return res.success(IfNode(cases, else_case))
+            new_cases, else_case = all_cases
+            cases.extend(new_cases)
+
+        return res.success((cases, else_case))
 
     def for_expr(self):
         res = ParseResult()
@@ -1504,20 +1557,21 @@ class Interpreter:
     def visit_IfNode(self, node, context):
         res = RuntimeResult()
 
-        for condition, expr in node.cases:
+        for condition, expr, should_return_null in node.cases:
             condition_value = res.register(self.visit(condition, context))
             if res.should_return(): return res
 
             if condition_value.is_true():
                 expr_value = res.register(self.visit(expr, context))
                 if res.should_return(): return res
-                return res.success(expr_value)
+                return res.success(Number(0) if should_return_null else expr_value)
         
         if node.else_case:
-            else_value = res.register(self.visit(node.else_case, context))
+            expr, should_return_null = node.else_case
+            expr_value = res.register(self.visit(expr, context))
             if res.should_return(): return res
-            return res.success(else_value)
-        return res.success(None)
+            return res.success(Number(0) if should_return_null else expr_value)
+        return res.success(Number(0))
 
     def visit_ForNode(self, node, context):
         res = RuntimeResult()
