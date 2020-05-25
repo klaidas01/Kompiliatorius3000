@@ -120,7 +120,7 @@ class Lexer:
     def define_lexer_rules(self):
         self.lexer_generator.ignore(r"\s+")
         self.lexer_generator.add(TT_STR, r"""(?=["'])(?:"[^"\\]*(?:\\[\s\S][^"\\]*)*"|'[^'\\]*(?:\\[\s\S][^'\\]*)*')""")
-        self.lexer_generator.add(TT_KEYWORD, r"\b(function|num|and|or|not|if|then|elif|else|for|to|step|while|str)\b")
+        self.lexer_generator.add(TT_KEYWORD, r"\b(function|num|and|or|not|end|if|then|elif|else|for|to|step|while|str)\b")
         self.lexer_generator.add(TT_NUM, r"(\d+(\.\d+)?)")
         self.lexer_generator.add(TT_PLUS, r"\+")
         self.lexer_generator.add(TT_ARROW, r"->")
@@ -228,12 +228,13 @@ class IfNode:
         self.end_pos = (self.else_case or self.cases[-1][0]).end_pos
 
 class ForNode:
-    def __init__(self, variable_name_token, start_value_node, end_value_node, step_value_node, body_node):
+    def __init__(self, variable_name_token, start_value_node, end_value_node, step_value_node, body_node, should_return_null):
         self.variable_name_token = variable_name_token
         self.start_value_node = start_value_node
         self.end_value_node = end_value_node
         self.step_value_node = step_value_node
         self.body_node = body_node
+        self.should_return_null = should_return_null
 
         self.start_pos = self.body_node.start_pos
         self.end_pos = self.body_node.end_pos
@@ -247,10 +248,11 @@ class WhileNode:
         self.end_pos = self.body_node.end_pos
 
 class FunctionDefinitionNode:
-    def __init__(self, var_name_token, arg_name_tokens, body_node, fn, txt):
+    def __init__(self, var_name_token, arg_name_tokens, body_node, fn, txt, should_return_null):
         self.var_name_token = var_name_token
         self.arg_name_tokens = arg_name_tokens
         self.body_node = body_node
+        self.should_return_null = should_return_null
 
         if self.var_name_token:
             self.start_pos = Position(self.var_name_token.getsourcepos().idx, self.var_name_token.getsourcepos().lineno - 1, self.var_name_token.getsourcepos().colno - 1, fn, txt)
@@ -534,7 +536,7 @@ class Parser:
         res = ParseResult()
         start_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt).copy()
         if self.current_token.getstr() == 'return':
-          res.registerAdvance
+          res.registerAdvance()
           self.advance()
 
           expr = res.tryRegister(self.expr())
@@ -543,7 +545,7 @@ class Parser:
           return res.success(ReturnNode(expr, start_pos, self.current_token.start_pos.copy()))
     
         if self.current_token.getstr() == 'break':
-          res.registerAdvance
+          res.registerAdvance()
           self.advance()
           return res.success(BreakNode(start_pos, self.current_token.start_pos.copy()))
 
@@ -742,10 +744,27 @@ class Parser:
         res.registerAdvance()
         self.advance()
 
-        body = res.register(self.expr())
+        if self.current_token.gettokentype() == TT_NL:
+          res.registerAdvance()
+          self.advance()
+
+          body = res.register(self.statements())
+          if res.error: return res
+
+          if not (self.current_token.gettokentype() == TT_KEYWORD and self.current_token.getstr() == 'end'):
+                start_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt)
+                end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno, self.fn, self.txt)
+                return res.failure(InvalidSyntaxError(start_pos, end_pos,f"Expected 'end'"))
+          
+          res.registerAdvance()
+          self.advance()
+
+          return res.success(ForNode(variable_name, start_value, end_value, step_value, body, True))
+    
+        body = res.register(self.statement())
         if res.error: return res
 
-        return res.success(ForNode(variable_name, start_value, end_value, step_value, body))
+        return res.success(ForNode(variable_name, start_value, end_value, step_value, body, False))
 
     def while_expr(self):
         res = ParseResult()
@@ -769,7 +788,7 @@ class Parser:
         res.registerAdvance()
         self.advance()
 
-        body = res.register(self.expr())
+        body = res.register(self.statements())
         if res.error: return res
 
         return res.success(WhileNode(condition, body))
@@ -833,18 +852,37 @@ class Parser:
         res.registerAdvance()
         self.advance()
 
-        if self.current_token.gettokentype() != TT_ARROW:
-                start_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt)
-                end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno, self.fn, self.txt)
-                return res.failure(InvalidSyntaxError(start_pos, end_pos,f"Expected '->'"))
+        if self.current_token.gettokentype() == TT_ARROW:
+            res.registerAdvance()
+            self.advance()
+
+            node_to_return = res.register(self.statements())
+            self.advance()
+            if res.error: return res
+            
+            return res.success(FunctionDefinitionNode(var_name_token, arg_name_tokens, node_to_return, self.fn, self.txt, True))
         
+        if self.current_token.gettokentype()  != TT_NL:
+            start_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt)
+            end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno, self.fn, self.txt)
+            return res.failure(InvalidSyntaxError(start_pos, self.end_pos, f"Expected '->' or NEWLINE"))
+
         res.registerAdvance()
         self.advance()
 
-        node_to_return = res.register(self.expr())
+        node_to_return = res.register(self.statements())    
         if res.error: return res
 
-        return res.success(FunctionDefinitionNode(var_name_token, arg_name_tokens, node_to_return, self.fn, self.txt))
+        if not (self.current_token.gettokentype() == TT_KEYWORD and self.current_token.getstr() == 'end'):
+            start_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt)
+            end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno, self.fn, self.txt)
+            return res.failure(InvalidSyntaxError(start_pos, end_pos, f"Expected 'end'"))
+
+        res.registerAdvance()
+        self.advance()
+    
+        return res.success(FunctionDefinitionNode(var_name_token, arg_name_tokens, node_to_return, self.fn, self.txt, False))
+
         
     def binaryOperation(self, funcA, operationTokens, funcB = None):
         if funcB == None:
@@ -1052,8 +1090,6 @@ class Number(Value):
 
     def __repr__(self):
         return str(self.value)
-        
-Number.null = Number(0)
 
 class String(Value):
     def __init__(self, value):
@@ -1139,10 +1175,11 @@ class List(Value):
     return f'{", ".join(repr(x) for x in self.elements)}'
 
 class Function(BaseFunction):
-    def __init__(self, name, body_node, arg_names):
+    def __init__(self, name, body_node, arg_names, should_return_null):
         super().__init__(name)
         self.body_node = body_node
         self.arg_names = arg_names
+        self.should_return_null = should_return_null
 
     def execute(self, args):
         res = RuntimeResult()
@@ -1153,10 +1190,10 @@ class Function(BaseFunction):
         
         value = res.register(interpreter.visit(self.body_node, exec_ctx))
         if res.error: return res
-        return res.success(value)
+        return res.success(Number(0) if self.should_return_null else value)
     
     def copy(self):
-        copy = Function(self.name, self.body_node, self.arg_names)
+        copy = Function(self.name, self.body_node, self.arg_names, self.should_return_null)
         copy.setContext(self.context)
         copy.setPosition(self.start_pos, self.end_pos)
         return copy
@@ -1250,7 +1287,7 @@ class BuiltInFunction(BaseFunction):
                 self.start_pos, self.end_pos, f"Failed to finish executing script \"{fn}\"\n" + error.toString(), exec_ctx
             ))
 
-        return RuntimeResult().success(Number.null)
+        return RuntimeResult().success(Number(0))
     execute_run.arg_names = ["fn"]
 
 BuiltInFunction.print = BuiltInFunction("print")
@@ -1343,7 +1380,7 @@ class Interpreter:
         func_name = node.var_name_token.value if node.var_name_token else None
         body_node = node.body_node
         arg_names = [arg_name.value for arg_name in node.arg_name_tokens]
-        func_value = Function(func_name, body_node, arg_names).setPosition(node.start_pos, node.end_pos).setContext(context)
+        func_value = Function(func_name, body_node, arg_names, node.should_return_null).setPosition(node.start_pos, node.end_pos).setContext(context)
 
         if node.var_name_token:
             context.symbolTable.set(func_name, func_value)
@@ -1467,7 +1504,7 @@ class Interpreter:
             elements.append(res.register(self.visit(node.body_node, context)))
             if res.error: return res
         
-        return res.success(List(elements).setContext().setPosition())
+        return res.success(Number(0) if node.should_return_null else List(elements).setContext().setPosition())
     
     def visit_WhileNode(self, node, context):
         res = RuntimeResult()
