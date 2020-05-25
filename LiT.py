@@ -248,11 +248,11 @@ class WhileNode:
         self.end_pos = self.body_node.end_pos
 
 class FunctionDefinitionNode:
-    def __init__(self, var_name_token, arg_name_tokens, body_node, fn, txt, should_return_null):
+    def __init__(self, var_name_token, arg_name_tokens, body_node, fn, txt, should_auto_return):
         self.var_name_token = var_name_token
         self.arg_name_tokens = arg_name_tokens
         self.body_node = body_node
-        self.should_return_null = should_return_null
+        self.should_auto_return = should_auto_return
 
         if self.var_name_token:
             self.start_pos = Position(self.var_name_token.getsourcepos().idx, self.var_name_token.getsourcepos().lineno - 1, self.var_name_token.getsourcepos().colno - 1, fn, txt)
@@ -536,26 +536,26 @@ class Parser:
         res = ParseResult()
         start_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt).copy()
         if self.current_token.getstr() == 'return':
-          res.registerAdvance()
-          self.advance()
+            res.registerAdvance()
+            self.advance()
 
-          expr = res.tryRegister(self.expr())
-          if not expr:
-            self.reverse(res.reverseCount)
-          return res.success(ReturnNode(expr, start_pos, self.current_token.start_pos.copy()))
-    
+            expr = res.tryRegister(self.expr())
+            if not expr:
+                self.reverse(res.reverseCount)
+            end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt).copy()
+            return res.success(ReturnNode(expr, start_pos, end_pos))
+        
         if self.current_token.getstr() == 'break':
-          res.registerAdvance()
-          self.advance()
-          return res.success(BreakNode(start_pos, self.current_token.start_pos.copy()))
+            res.registerAdvance()
+            self.advance()
+            end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt).copy()
+            return res.success(BreakNode(start_pos, end_pos))
 
         expr = res.register(self.expr())
-        start_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt).copy()
-        end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno, self.current_token.getsourcepos().colno, self.fn, self.txt).copy()
         if res.error:
-          return res.failure(InvalidSyntaxError(
-            start_pos, end_pos, "Expected 'return', 'break', 'num', 'if', 'for', 'while', 'function', identifier, '+', '-', '(' or '['"
-          ))
+            start_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt).copy()
+            end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno, self.current_token.getsourcepos().colno, self.fn, self.txt).copy()
+            return res.failure(InvalidSyntaxError(start_pos, end_pos, "Expected 'return', 'break', 'num', 'if', 'for', 'while', 'function', identifier, '+', '-', '(' or '['"))
         return res.success(expr)
 
     def expr(self):
@@ -916,20 +916,46 @@ class Parser:
 
 class RuntimeResult:
     def __init__(self):
+        self.reset()
+
+    def reset(self):
         self.value = None
         self.error = None
+        self.func_return_value = None
+        self.loop_should_break = False
 
     def register(self, res):
         if res.error: self.error = res.error
+        self.func_return_value = res.func_return_value
+        self.loop_should_break = res.loop_should_break
         return res.value
     
     def success(self, value):
+        self.reset()
         self.value = value
         return self
 
+    def success_return(self, value):
+        self.reset()
+        self.func_return_value = value
+        return self
+
+    def success_break(self):
+        self.reset()
+        self.loop_should_break = True
+        return self
+
     def failure(self, error):
+        self.reset()
         self.error = error
         return self
+
+    def should_return(self):
+        return (
+            self.error or
+            self.func_return_value or
+            self.loop_should_break
+        )
 
 #VALUES
 
@@ -1161,7 +1187,7 @@ class BaseFunction(Value):
     def checkAndPopulateArgs(self, arg_names, args, exec_ctx):
         res = RuntimeResult()
         res.register(self.check_args(arg_names, args))
-        if res.error: return res
+        if res.should_return(): return res
         self.populateArgs(arg_names, args, exec_ctx)
         return res.success(None)
 
@@ -1188,25 +1214,26 @@ class List(Value):
     return f'{", ".join(repr(x) for x in self.elements)}'
 
 class Function(BaseFunction):
-    def __init__(self, name, body_node, arg_names, should_return_null):
+    def __init__(self, name, body_node, arg_names, should_auto_return):
         super().__init__(name)
         self.body_node = body_node
         self.arg_names = arg_names
-        self.should_return_null = should_return_null
+        self.should_auto_return = should_auto_return
 
     def execute(self, args):
         res = RuntimeResult()
         interpreter = Interpreter()
         exec_ctx = self.generateNewContext()
         res.register(self.checkAndPopulateArgs(self.arg_names, args, exec_ctx))
-        if res.error: return res
+        if res.should_return(): return res
         
         value = res.register(interpreter.visit(self.body_node, exec_ctx))
-        if res.error: return res
-        return res.success(Number(0) if self.should_return_null else value)
+        if res.should_return() and res.func_return_value == None: return res
+        return_value = (value if self.should_auto_return else None) or res.func_return_value or Number(0)
+        return res.success(return_value)
     
     def copy(self):
-        copy = Function(self.name, self.body_node, self.arg_names, self.should_return_null)
+        copy = Function(self.name, self.body_node, self.arg_names, self.should_auto_return)
         copy.setContext(self.context)
         copy.setPosition(self.start_pos, self.end_pos)
         return copy
@@ -1226,10 +1253,10 @@ class BuiltInFunction(BaseFunction):
         method = getattr(self, methodName, self.noVisit)
 
         res.register(self.checkAndPopulateArgs(method.arg_names, args, exec_ctx))
-        if res.error: return res
+        if res.should_return(): return res
 
         returnVal = res.register(method(exec_ctx))
-        if res.error: return res
+        if res.should_return(): return res
         return res.success(returnVal)
 
     def noVisit(self, node, context):
@@ -1366,7 +1393,7 @@ class Interpreter:
         res = RuntimeResult()
         varName = node.varNameToken.value
         value = res.register(self.visit(node.valueNode, context))
-        if res.error: return res
+        if res.should_return(): return res
 
         if node.varType == 'num' and not isinstance(value, Number):
             return res.failure(TypeError(node.start_pos, node.end_pos, 'Expected a number'))
@@ -1389,7 +1416,7 @@ class Interpreter:
 
         for elementNode in node.elementNodes:
           elements.append(res.register(self.visit(elementNode, context)))
-          if res.error: return res
+          if res.should_return(): return res
 
         return res.success(List(elements).setContext(context).setPosition(node.start_pos, node.end_pos))
 
@@ -1398,7 +1425,7 @@ class Interpreter:
         func_name = node.var_name_token.value if node.var_name_token else None
         body_node = node.body_node
         arg_names = [arg_name.value for arg_name in node.arg_name_tokens]
-        func_value = Function(func_name, body_node, arg_names, node.should_return_null).setPosition(node.start_pos, node.end_pos).setContext(context)
+        func_value = Function(func_name, body_node, arg_names, node.should_auto_return).setPosition(node.start_pos, node.end_pos).setContext(context)
 
         if node.var_name_token:
             context.symbolTable.set(func_name, func_value)
@@ -1409,13 +1436,13 @@ class Interpreter:
         args = []
 
         value_to_call = res.register(self.visit(node.node_to_call, context))
-        if res.error: return res
+        if res.should_return(): return res
         value_to_call = value_to_call.copy().setPosition(node.start_pos, node.end_pos)
         for arg_node in node.arg_nodes:
             args.append(res.register(self.visit(arg_node, context)))
-            if res.error: return res
+            if res.should_return(): return res
         return_value = res.register(value_to_call.execute(args))
-        if res.error: return res
+        if res.should_return(): return res
         return_value.setPosition(node.start_pos, node.end_pos).setContext(context)
         return_value = return_value.copy().setPosition(node.start_pos, node.end_pos).setContext(context)
         return res.success(return_value)
@@ -1423,9 +1450,9 @@ class Interpreter:
     def visit_BinaryOperationNode(self, node, context):
         res = RuntimeResult()
         left = res.register(self.visit(node.leftNode, context))
-        if res.error: return res
+        if res.should_return(): return res
         right = res.register(self.visit(node.rightNode, context))
-        if res.error: return res
+        if res.should_return(): return res
 
         error = None
         if node.opToken.gettokentype() == TT_PLUS:
@@ -1463,7 +1490,7 @@ class Interpreter:
     def visit_UnaryOperationNode(self, node, context):
         res = RuntimeResult()
         number = res.register(self.visit(node.node, context))
-        if res.error: return res
+        if res.should_return(): return res
         error = None
         if node.opToken.gettokentype() == TT_MINUS:
             number, error = number.multiply(Number(-1))
@@ -1479,16 +1506,16 @@ class Interpreter:
 
         for condition, expr in node.cases:
             condition_value = res.register(self.visit(condition, context))
-            if res.error: return res
+            if res.should_return(): return res
 
             if condition_value.is_true():
                 expr_value = res.register(self.visit(expr, context))
-                if res.error: return res
+                if res.should_return(): return res
                 return res.success(expr_value)
         
         if node.else_case:
             else_value = res.register(self.visit(node.else_case, context))
-            if res.error: return res
+            if res.should_return(): return res
             return res.success(else_value)
         return res.success(None)
 
@@ -1497,14 +1524,14 @@ class Interpreter:
         elements = []
 
         start_value = res.register(self.visit(node.start_value_node, context))
-        if res.error: return res
+        if res.should_return(): return res
 
         end_value = res.register(self.visit(node.end_value_node, context))
-        if res.error: return res
+        if res.should_return(): return res
 
         if node.step_value_node:
             step_value = res.register(self.visit(node.step_value_node, context))
-            if res.error: return res
+            if res.should_return(): return res
         else:
             step_value = Number(1)
         
@@ -1519,8 +1546,13 @@ class Interpreter:
             context.symbolTable.set(node.variable_name_token.value, Number(i))
             i += step_value.value
 
-            elements.append(res.register(self.visit(node.body_node, context)))
-            if res.error: return res
+            value = res.register(self.visit(node.body_node, context))
+            if res.should_return() and res.loop_should_break == False: return res
+
+            if res.loop_should_break:
+                break
+
+            elements.append(value)
         
         return res.success(Number(0) if node.should_return_null else List(elements).setContext().setPosition())
     
@@ -1530,13 +1562,30 @@ class Interpreter:
 
         while True:
             condition = res.register(self.visit(node.condition_node, context))
-            if res.error: return res
+            if res.should_return(): return res
 
             if not condition.is_true(): break
 
-            elements.append(res.register(self.visit(node.body_node, context)))
-            if res.error: return res
+            value = res.register(self.visit(node.body_node, context))
+            if res.should_return() and res.loop_should_break == False: return res
+
+            if res.loop_should_break:
+                break
+
+            elements.append(value)
         return res.success(List(elements).setContext().setPosition())
+    
+    def visit_ReturnNode(self, node, context):
+        res = RuntimeResult()
+        if node.node_to_return:
+            value = res.register(self.visit(node.node_to_return, context))
+            if res.should_return(): return res
+        else:
+            value = Number(0)
+        return res.success_return(value)
+
+    def visit_BreakNode(self, node, context):
+        return RuntimeResult().success_break()
 
 #RUN
 

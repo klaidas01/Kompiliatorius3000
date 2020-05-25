@@ -1,9 +1,8 @@
-for i = 0 to 5 then
-print(i)
+function fib(n)
+if n <= 1 then return n
+end
+return fib(n-1) + fib(n-1)
 end
 
-num x = 10
-while x < 15 then
+num x = fib(1)
 print(x)
-num x = x + 1
-end

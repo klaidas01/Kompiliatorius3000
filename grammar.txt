@@ -1,4 +1,7 @@
-statements	: NEWLINE* expt(NEWLINE+ expr)* NEWLINE*
+statements	: NEWLINE* expt(NEWLINE+ statement)* NEWLINE*
+
+statement	: KEYWORD:return expr?
+			: expr
 
 expr        : KEYWORD IDENTIFIER EQ expr
 			: comp-expr ((KEYWORD:and|KEYWORD:or) comp-expr)*
