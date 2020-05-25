@@ -1,4 +1,7 @@
-statements	: NEWLINE* expt(NEWLINE+ expr)* NEWLINE*
+statements	: NEWLINE* expt(NEWLINE+ statement)* NEWLINE*
+
+statement	: KEYWORD:return expr?
+			: expr
 
 expr        : KEYWORD IDENTIFIER EQ expr
 			: comp-expr ((KEYWORD:and|KEYWORD:or) comp-expr)*
@@ -27,17 +30,17 @@ atom 		: NUM|IDENTIFIER|STR
 
 list-expr	: LSQUARE (expr (COMMA expr)*)? RSQUARE
 
-if-expr		: KEYWORD:if expr KEYWORD:then 
-		 	  (expr elif-expr|else-expr?)
-			| (NEWLINE statements KEYWORD:end|elif-expr|else-expr)
+if-expr     : KEYWORD:if expr KEYWORD:then
+              (expr if-expr-b|if-expr-c?)
+            | (NEWLINE statements KEYWORD:end|if-expr-b|if-expr-c)
 
-elif-expr	: KEYWORD:elif expr KEYWORD:then 
-		 	  (expr elif-expr|else-expr?)
-			| (NEWLINE statements KEYWORD:end|elif-expr|else-expr)
+if-expr-b   : KEYWORD:elif expr KEYWORD:then
+              (expr if-expr-b|if-expr-c?)
+            | (NEWLINE statements KEYWORD:end|if-expr-b|if-expr-c)
 
-else-expr	: KEYWORD:else
-			  expr 
-			| (NEWLINE statements KEYWORD:end)
+if-expr-c   : KEYWORD:else
+              expr
+            | (NEWLINE statements KEYWORD:end)
 
 for-expr	: KEYWORD:for IDENTIFIER EQ exrp KEYWORD:TO expr
 			  (KEYWORD:step expr)? KEYWORD:then
