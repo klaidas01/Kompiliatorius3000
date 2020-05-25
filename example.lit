@@ -1,5 +1,9 @@
-num i = 0;
-while i < 5 then; 
-num i = i + 2;
-print(i);
-end;
+for i = 0 to 5 then
+print(i)
+end
+
+num x = 10
+while x < 15 then
+print(x)
+num x = x + 1
+end

@@ -141,7 +141,7 @@ class Lexer:
         self.lexer_generator.add(TT_LSQUARE, r"\[")
         self.lexer_generator.add(TT_RSQUARE, r"\]")
         self.lexer_generator.add(TT_IDENTIFIER, r"[a-zA-Z][a-zA-Z0-9]*")
-        self.lexer_generator.add(TT_NL, r";")
+        self.lexer_generator.add(TT_NL, r"\\n")
         self.lexer_generator.add(TT_ERROR, r".*\s")
 
     def get_token_list(self):
@@ -1287,7 +1287,12 @@ class BuiltInFunction(BaseFunction):
         fn = fn.value.replace("\"", "")
         try:
             with open(fn, "r") as f:
-                script = f.read()
+                line = f.readline() + '\\n'
+                script = line
+                while (line and line != '\\n'):
+                    line = f.readline() + '\\n'
+                    script += line
+                script = script.replace('\\n', ' \\n ')
         except Exception as e:
             return RuntimeResult().failure(RuntimeError(
                 self.start_pos, self.end_pos, f"Failed to load script \"{fn}\"\n" + str(e), exec_ctx
