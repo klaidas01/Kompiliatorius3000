@@ -788,6 +788,19 @@ class Parser:
         res.registerAdvance()
         self.advance()
 
+        if self.current_token.gettokentype() == TT_NL:
+            res.registerAdvance()
+            self.advance()
+            body = res.register(self.statements())
+            if res.error: return res
+            if not (self.current_token.gettokentype() == TT_KEYWORD and self.current_token.getstr() == 'end'):
+                start_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt)
+                end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno, self.fn, self.txt)
+                return res.failure(InvalidSyntaxError(start_pos, end_pos,f"Expected 'end'"))
+            res.registerAdvance()
+            self.advance()
+            return res.success(WhileNode(condition, body))
+
         body = res.register(self.statements())
         if res.error: return res
 
@@ -865,7 +878,7 @@ class Parser:
         if self.current_token.gettokentype()  != TT_NL:
             start_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt)
             end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno, self.fn, self.txt)
-            return res.failure(InvalidSyntaxError(start_pos, self.end_pos, f"Expected '->' or NEWLINE"))
+            return res.failure(InvalidSyntaxError(start_pos, end_pos, f"Expected '->' or NEWLINE"))
 
         res.registerAdvance()
         self.advance()
