@@ -1,2 +1,5 @@
-function TestFunction(a) -> print(a);print(a); end;
-TestFunction("Hello")
+num i = 0;
+while i < 5 then; 
+num i = i + 2;
+print(i);
+end;
