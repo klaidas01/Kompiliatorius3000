@@ -856,9 +856,10 @@ class Parser:
             res.registerAdvance()
             self.advance()
 
-            node_to_return = res.register(self.expr())
+            node_to_return = res.register(self.statements())
+            self.advance()
             if res.error: return res
-
+            
             return res.success(FunctionDefinitionNode(var_name_token, arg_name_tokens, node_to_return, self.fn, self.txt, True))
         
         if self.current_token.gettokentype()  != TT_NL:
@@ -869,7 +870,7 @@ class Parser:
         res.registerAdvance()
         self.advance()
 
-        body = res.register(self.statements())
+        node_to_return = res.register(self.statements())    
         if res.error: return res
 
         if not (self.current_token.gettokentype() == TT_KEYWORD and self.current_token.getstr() == 'end'):
