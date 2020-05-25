@@ -718,7 +718,7 @@ class Parser:
             if res.error: return res
             cases.append((condition, statements, True))
 
-            if self.current_token.getstr() == 'END':
+            if self.current_token.getstr() == 'end':
                 res.registerAdvance()
                 self.advance()
             else:
