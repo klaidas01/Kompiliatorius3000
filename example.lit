@@ -5,5 +5,23 @@ end
 return fib(n-1) + fib(n-2)
 end
 
+function fibloop(n)
+if n <= 1 then
+return n
+end
+num ppn = 0
+num pn = 0
+num cn = 1
+for i = 1 to n then
+num ppn = pn
+num pn = cn
+num cn = ppn + pn
+end
+return cn
+end
+
 num x = fib(10)
 print(x)
+
+num y = fibloop(10)
+print(y)
