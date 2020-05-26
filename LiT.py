@@ -1356,6 +1356,26 @@ class BuiltInFunction(BaseFunction):
         return RuntimeResult().success(Number(len(list_.elements)))
     execute_len.arg_names = ["list"]
 
+    def execute_printFile(self, exec_ctx):
+        fn = exec_ctx.symbolTable.get("fn")
+        if not isinstance(fn, String):
+            return RuntimeResult().failure(RuntimeError(
+                self.start_pos, self.end_pos, "Argument must be string", exec_ctx
+            ))
+        
+        fn = fn.value.replace("\"", "")
+        try:
+            with open(fn, "w") as f:
+                f.write(str(exec_ctx.symbolTable.get('value')).strip('"\''))
+                f.close()
+        except Exception as e:
+            return RuntimeResult().failure(RuntimeError(
+                self.start_pos, self.end_pos, f"Failed to load script \"{fn}\"\n" + str(e), exec_ctx
+            ))
+
+        return RuntimeResult().success(Number(0))
+    execute_printFile.arg_names = ["fn", "value"]
+
     def execute_run(self, exec_ctx):
         fn = exec_ctx.symbolTable.get("fn")
 
@@ -1388,7 +1408,10 @@ class BuiltInFunction(BaseFunction):
         return RuntimeResult().success(Number(0))
     execute_run.arg_names = ["fn"]
 
+
+
 BuiltInFunction.print = BuiltInFunction("print")
+BuiltInFunction.printFile = BuiltInFunction("printFile")
 BuiltInFunction.input = BuiltInFunction("input")
 BuiltInFunction.inputNum = BuiltInFunction("inputNum")
 BuiltInFunction.len = BuiltInFunction("len")
@@ -1645,10 +1668,11 @@ class Interpreter:
 
 globalSymbolTable = SymbolTable()
 globalSymbolTable.set("print", BuiltInFunction.print)
+globalSymbolTable.set("printFile", BuiltInFunction.printFile)
 globalSymbolTable.set("input", BuiltInFunction.input)
 globalSymbolTable.set("inputNum", BuiltInFunction.inputNum)
-globalSymbolTable.set("LEN", BuiltInFunction.len)
-globalSymbolTable.set("RUN", BuiltInFunction.run)
+globalSymbolTable.set("len", BuiltInFunction.len)
+globalSymbolTable.set("run", BuiltInFunction.run)
 
 def run(fn, text):
     #Generate tokens
