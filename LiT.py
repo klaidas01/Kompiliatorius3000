@@ -1372,11 +1372,6 @@ class BuiltInFunction(BaseFunction):
             return RuntimeResult().failure(RuntimeError(
                 self.start_pos, self.end_pos, f"Failed to load script \"{fn}\"\n" + str(e), exec_ctx
             ))
-        
-        if e:
-            return RuntimeResult().failure(RuntimeError(
-                self.start_pos, self.end_pos, f"Failed to finish  \"{fn}\"\n" + e, exec_ctx
-            ))
 
         return RuntimeResult().success(Number(0))
     execute_printFile.arg_names = ["fn", "value"]
