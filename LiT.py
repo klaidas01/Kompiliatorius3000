@@ -282,9 +282,10 @@ class ReturnNode:
     self.end_pos = end_pos
 
 class BreakNode:
-  def __init__(self, start_pos, end_pos):
+  def __init__(self, start_pos, end_pos, break_count):
     self.start_pos = start_pos
     self.end_pos = end_pos
+    self.break_count = break_count
 
 #PARSE RESULT
 
@@ -548,8 +549,27 @@ class Parser:
         if self.current_token.getstr() == 'break':
             res.registerAdvance()
             self.advance()
+            if self.current_token.gettokentype() != TT_LPAREN:
+                start_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt).copy()
+                end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno, self.current_token.getsourcepos().colno, self.fn, self.txt).copy()
+                return res.failure(InvalidSyntaxError(start_pos, end_pos, "Expected  '('"))
+            res.registerAdvance()
+            self.advance()
+            if self.current_token.gettokentype() != TT_NUM:
+                start_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt).copy()
+                end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno, self.current_token.getsourcepos().colno, self.fn, self.txt).copy()
+                return res.failure(InvalidSyntaxError(start_pos, end_pos, "Expected a number"))
+            break_count = int(self.current_token.getstr())
+            res.registerAdvance()
+            self.advance()
+            if self.current_token.gettokentype() != TT_RPAREN:
+                start_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt).copy()
+                end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno, self.current_token.getsourcepos().colno, self.fn, self.txt).copy()
+                return res.failure(InvalidSyntaxError(start_pos, end_pos, "Expected  ')'"))
+            res.registerAdvance()
+            self.advance()
             end_pos = Position(self.current_token.getsourcepos().idx, self.current_token.getsourcepos().lineno - 1, self.current_token.getsourcepos().colno - 1, self.fn, self.txt).copy()
-            return res.success(BreakNode(start_pos, end_pos))
+            return res.success(BreakNode(start_pos, end_pos, break_count))
 
         expr = res.register(self.expr())
         if res.error:
@@ -969,18 +989,18 @@ class Parser:
 
 class RuntimeResult:
     def __init__(self):
+        self.loop_break_count = 0
         self.reset()
 
     def reset(self):
         self.value = None
         self.error = None
         self.func_return_value = None
-        self.loop_should_break = False
 
     def register(self, res):
         if res.error: self.error = res.error
         self.func_return_value = res.func_return_value
-        self.loop_should_break = res.loop_should_break
+        self.loop_break_count = res.loop_break_count
         return res.value
     
     def success(self, value):
@@ -993,9 +1013,13 @@ class RuntimeResult:
         self.func_return_value = value
         return self
 
-    def success_break(self):
+    def success_break(self, value):
         self.reset()
-        self.loop_should_break = True
+        self.loop_break_count = value
+        return self
+
+    def after_break(self):
+        self.loop_break_count -= 1
         return self
 
     def failure(self, error):
@@ -1007,7 +1031,7 @@ class RuntimeResult:
         return (
             self.error or
             self.func_return_value or
-            self.loop_should_break
+            self.loop_break_count
         )
 
 #VALUES
@@ -1372,7 +1396,6 @@ class BuiltInFunction(BaseFunction):
             return RuntimeResult().failure(RuntimeError(
                 self.start_pos, self.end_pos, f"Failed to load script \"{fn}\"\n" + str(e), exec_ctx
             ))
-
         return RuntimeResult().success(Number(0))
     execute_printFile.arg_names = ["fn", "value"]
 
@@ -1624,9 +1647,10 @@ class Interpreter:
             i += step_value.value
 
             value = res.register(self.visit(node.body_node, context))
-            if res.should_return() and res.loop_should_break == False: return res
+            if res.should_return() and res.loop_break_count == 0: return res
 
-            if res.loop_should_break:
+            if res.loop_break_count > 0:
+                res.after_break()
                 break
 
             elements.append(value)
@@ -1644,9 +1668,10 @@ class Interpreter:
             if not condition.is_true(): break
 
             value = res.register(self.visit(node.body_node, context))
-            if res.should_return() and res.loop_should_break == False: return res
+            if res.should_return() and res.loop_break_count == 0: return res
 
-            if res.loop_should_break:
+            if res.loop_break_count > 0:
+                res.after_break()
                 break
 
             elements.append(value)
@@ -1662,7 +1687,7 @@ class Interpreter:
         return res.success_return(value)
 
     def visit_BreakNode(self, node, context):
-        return RuntimeResult().success_break()
+        return RuntimeResult().success_break(node.break_count)
 
 #RUN
 
