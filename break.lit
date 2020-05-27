@@ -2,13 +2,21 @@ for i = 0 to 5 then
 for j = 0 to 2 then
 print(i)
 if i > 2 then
-break(3)
+break(10)
 end
 end
 end
 
 for i = 0 to 3 then
 print("test")
+end
+
+for i = 0 to 3 then
+print("test2")
+end
+
+for i = 0 to 3 then
+print("test3")
 end
 
 print("ended!")

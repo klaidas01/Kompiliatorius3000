@@ -1030,8 +1030,7 @@ class RuntimeResult:
     def should_return(self):
         return (
             self.error or
-            self.func_return_value or
-            self.loop_break_count
+            self.func_return_value
         )
 
 #VALUES
